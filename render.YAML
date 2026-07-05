@@ -3,7 +3,7 @@ services:
     name: smart-attendance
     env: python
     plan: free
-    buildCommand: "pip install -r requirements.txt"
+    buildCommand: "pip install -r requirements.txt && pip install --no-deps face_recognition==1.3.0"
     startCommand: "gunicorn app:app --timeout 120 --workers 2"
     envVars:
       - key: PYTHON_VERSION
