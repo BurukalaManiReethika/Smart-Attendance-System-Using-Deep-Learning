@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Records — Smart Attendance</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><span class="dot"></span> Smart Attendance</div>
+  <div class="nav">
+    <a href="/">Scan</a>
+    <a href="/enroll">Enroll</a>
+    <a href="/attendance" class="active">Records</a>
+  </div>
+</div>
+
+<div class="wrap">
+  <h1>Today's Attendance <span class="count-badge">{{ today }}</span></h1>
+  <p class="subtitle">{{ rows|length }} person(s) marked present today.</p>
+
+  <div class="panel">
+    {% if rows %}
+    <table>
+      <thead>
+        <tr><th>Name</th><th>Date</th><th>Time</th></tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr><td>{{ row[0] }}</td><td>{{ row[1] }}</td><td>{{ row[2] }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No attendance marked yet today. Go to the Scan page to begin.</div>
+    {% endif %}
+  </div>
+</div>
+
+</body>
+</html>
