@@ -1,6 +1,8 @@
 Flask==3.0.3
 gunicorn==22.0.0
-face_recognition==1.3.0
 opencv-python-headless==4.9.0.80
 numpy==1.26.4
 dlib-bin==20.0.1
+face-recognition-models==0.3.0
+Pillow
+Click
