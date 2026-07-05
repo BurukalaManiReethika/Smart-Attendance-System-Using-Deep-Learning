@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smart Attendance</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><span class="dot"></span> Smart Attendance</div>
+  <div class="nav">
+    <a href="/" class="active">Scan</a>
+    <a href="/enroll">Enroll</a>
+    <a href="/attendance">Records</a>
+  </div>
+</div>
+
+<div class="wrap">
+  <h1>Live Attendance Scan</h1>
+  <p class="subtitle">Point the camera at your face. Attendance marks automatically once per person, per day.</p>
+
+  <div class="panel">
+    <div class="video-stage">
+      <video id="video" autoplay muted playsinline></video>
+      <canvas id="overlay" class="overlay"></canvas>
+    </div>
+
+    <div class="status-bar">
+      <span id="statusDot" class="status-dot"></span>
+      <span id="statusText">Starting camera…</span>
+      <span id="markedCount" class="count-badge">0 marked today</span>
+    </div>
+
+    <div class="feed-log" id="feedLog"></div>
+  </div>
+</div>
+
+<canvas id="captureCanvas" style="display:none;"></canvas>
+
+<script>
+const video = document.getElementById('video');
+const overlay = document.getElementById('overlay');
+const captureCanvas = document.getElementById('captureCanvas');
+const statusDot = document.getElementById('statusDot');
+const statusText = document.getElementById('statusText');
+const markedCount = document.getElementById('markedCount');
+const feedLog = document.getElementById('feedLog');
+
+let scanning = false;
+
+async function startCamera() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+    video.srcObject = stream;
+    video.onloadedmetadata = () => {
+      overlay.width = video.videoWidth;
+      overlay.height = video.videoHeight;
+      captureCanvas.width = video.videoWidth;
+      captureCanvas.height = video.videoHeight;
+      statusText.textContent = 'Scanning…';
+      statusDot.classList.add('live');
+      scanning = true;
+      scanLoop();
+    };
+  } catch (err) {
+    statusText.textContent = 'Camera access denied or unavailable.';
+  }
+}
+
+function logEntry(text, isNew) {
+  const div = document.createElement('div');
+  div.className = 'entry' + (isNew ? ' new' : '');
+  const time = new Date().toLocaleTimeString();
+  div.textContent = `[${time}] ${text}`;
+  feedLog.prepend(div);
+  while (feedLog.children.length > 30) feedLog.removeChild(feedLog.lastChild);
+}
+
+async function scanLoop() {
+  if (!scanning) return;
+
+  const ctx = captureCanvas.getContext('2d');
+  ctx.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
+  const dataUrl = captureCanvas.toDataURL('image/jpeg', 0.7);
+
+  try {
+    const res = await fetch('/api/recognize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: dataUrl })
+    });
+    const data = await res.json();
+    drawResults(data.faces || []);
+    markedCount.textContent = `${(data.marked_today || []).length} marked today`;
+
+    (data.faces || []).forEach(f => {
+      if (f.name !== 'Unknown') {
+        logEntry(f.marked_now ? `✓ ${f.name} marked present` : `${f.name} recognized (already marked)`, f.marked_now);
+      }
+    });
+  } catch (err) {
+    statusText.textContent = 'Connection issue, retrying…';
+  }
+
+  setTimeout(scanLoop, 2000); // scan every 2 seconds
+}
+
+function drawResults(faces) {
+  const ctx = overlay.getContext('2d');
+  ctx.clearRect(0, 0, overlay.width, overlay.height);
+  faces.forEach(f => {
+    const [top, right, bottom, left] = f.box;
+    const known = f.name !== 'Unknown';
+    ctx.strokeStyle = known ? '#4fd1a5' : '#e0616b';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(left, top, right - left, bottom - top);
+
+    ctx.fillStyle = known ? '#4fd1a5' : '#e0616b';
+    ctx.font = '16px Inter, sans-serif';
+    const label = known ? `${f.name} — PRESENT` : 'Unknown';
+    ctx.fillText(label, left, top - 8 > 10 ? top - 8 : top + 20);
+  });
+}
+
+startCamera();
+</script>
+
+</body>
+</html>
