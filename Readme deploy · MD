@@ -1,0 +1,59 @@
+# Deploying to Render
+
+This is a Flask web app — the browser handles the camera (via `getUserMedia`),
+and the Render server only receives image frames and runs face recognition.
+That's why this works on Render but plain `cv2.VideoCapture()` scripts don't.
+
+## ⚠️ Important Note About Storage
+
+Render's filesystem is **ephemeral** — anything saved to disk (enrolled photos,
+`encodings.pickle`, attendance CSVs) is **wiped on every deploy/restart**.
+For a personal/learning project this is fine to start with, but know that:
+- Re-enroll people after each redeploy, OR
+- Add a **Render Persistent Disk** (Render dashboard → your service → "Disks" → mount at `/opt/render/project/src/known_faces` etc.), OR
+- Later upgrade to store encodings in a real database (Postgres/Firebase) instead of files.
+
+## Steps to Deploy
+
+### 1. Push this project to GitHub
+```bash
+cd attendance_web
+git init
+git add .
+git commit -m "Smart attendance web app"
+git branch -M main
+git remote add origin https://github.com/<your-username>/smart-attendance-web.git
+git push -u origin main
+```
+
+### 2. Create a new Web Service on Render
+1. Go to https://render.com → **New** → **Web Service**
+2. Connect your GitHub repo
+3. Render should auto-detect `render.yaml` — if not, set manually:
+   - **Build Command:** `pip install -r requirements.txt`
+   - **Start Command:** `gunicorn app:app --timeout 120 --workers 2`
+   - **Environment:** Python 3
+4. Click **Create Web Service**
+
+### 3. Wait for build
+⚠️ `dlib` takes a while to compile (5–15 min on Render's free tier — it's compiling C++ code).
+This is normal, be patient on first deploy.
+
+### 4. Open your app
+Render gives you a URL like `https://smart-attendance-web.onrender.com`
+- `/` → live scan page (uses your device's camera — works on phone browsers too!)
+- `/enroll` → enroll new people
+- `/attendance` → today's attendance list
+
+## Notes on Free Tier
+- Render free web services **sleep after 15 min of inactivity** and take ~30-50 sec to wake up on the next request.
+- Free tier has limited RAM — face_recognition/dlib is memory-heavy. If you hit memory errors, either:
+  - Reduce frame size further in `app.py` (`cv2.resize(frame, fx=0.35, fy=0.35)`), or
+  - Upgrade to a paid instance type.
+
+## Testing Locally Before Deploying
+```bash
+pip install -r requirements.txt
+python app.py
+```
+Open `http://localhost:5000` in your browser (Chrome/Edge recommended for camera access).
