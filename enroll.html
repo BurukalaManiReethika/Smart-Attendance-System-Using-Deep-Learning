@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Enroll — Smart Attendance</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><span class="dot"></span> Smart Attendance</div>
+  <div class="nav">
+    <a href="/">Scan</a>
+    <a href="/enroll" class="active">Enroll</a>
+    <a href="/attendance">Records</a>
+  </div>
+</div>
+
+<div class="wrap">
+  <h1>Enroll a New Person</h1>
+  <p class="subtitle">Capture 5 photos from slightly different angles for a reliable match.</p>
+
+  <div class="panel">
+    <input type="text" id="nameInput" placeholder="Full name (e.g. Ravi Kumar)">
+
+    <div class="video-stage">
+      <video id="video" autoplay muted playsinline></video>
+    </div>
+
+    <div class="progress-dots" id="progressDots">
+      <span></span><span></span><span></span><span></span><span></span>
+    </div>
+
+    <div style="display:flex; gap:10px; justify-content:center; margin-top:18px;">
+      <button class="btn" id="captureBtn">Capture Photo</button>
+      <button class="btn secondary" id="submitBtn" disabled>Save Person</button>
+    </div>
+
+    <div id="msgBox"></div>
+  </div>
+</div>
+
+<canvas id="captureCanvas" style="display:none;"></canvas>
+
+<script>
+const video = document.getElementById('video');
+const captureCanvas = document.getElementById('captureCanvas');
+const captureBtn = document.getElementById('captureBtn');
+const submitBtn = document.getElementById('submitBtn');
+const nameInput = document.getElementById('nameInput');
+const dots = document.querySelectorAll('#progressDots span');
+const msgBox = document.getElementById('msgBox');
+
+const TARGET_PHOTOS = 5;
+let captured = [];
+
+async function startCamera() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+    video.srcObject = stream;
+    video.onloadedmetadata = () => {
+      captureCanvas.width = video.videoWidth;
+      captureCanvas.height = video.videoHeight;
+    };
+  } catch (err) {
+    msgBox.innerHTML = '<div class="msg error">Camera access denied.</div>';
+  }
+}
+
+captureBtn.addEventListener('click', () => {
+  if (captured.length >= TARGET_PHOTOS) return;
+  const ctx = captureCanvas.getContext('2d');
+  ctx.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
+  captured.push(captureCanvas.toDataURL('image/jpeg', 0.85));
+  dots[captured.length - 1].classList.add('done');
+
+  if (captured.length >= TARGET_PHOTOS) {
+    captureBtn.disabled = true;
+    submitBtn.disabled = false;
+    msgBox.innerHTML = '<div class="msg success">All photos captured. Click "Save Person".</div>';
+  }
+});
+
+submitBtn.addEventListener('click', async () => {
+  const name = nameInput.value.trim();
+  if (!name) {
+    msgBox.innerHTML = '<div class="msg error">Please enter a name.</div>';
+    return;
+  }
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Saving…';
+
+  try {
+    const res = await fetch('/api/enroll', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, images: captured })
+    });
+    const data = await res.json();
+
+    if (res.ok) {
+      msgBox.innerHTML = `<div class="msg success">${data.message}</div>`;
+      captured = [];
+      dots.forEach(d => d.classList.remove('done'));
+      nameInput.value = '';
+      captureBtn.disabled = false;
+    } else {
+      msgBox.innerHTML = `<div class="msg error">${data.error}</div>`;
+      submitBtn.disabled = false;
+    }
+  } catch (err) {
+    msgBox.innerHTML = '<div class="msg error">Could not reach server.</div>';
+    submitBtn.disabled = false;
+  }
+  submitBtn.textContent = 'Save Person';
+});
+
+startCamera();
+</script>
+
+</body>
+</html>
