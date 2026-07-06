@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+encodings.pickle
+emails.json
+known_faces/*/
+attendance_records/*.csv
+.DS_Store
