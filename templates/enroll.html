@@ -23,6 +23,7 @@
 
   <div class="panel">
     <input type="text" id="nameInput" placeholder="Full name (e.g. Ravi Kumar)">
+    <input type="text" id="emailInput" placeholder="Email address (for attendance alerts)">
 
     <div class="video-stage">
       <video id="video" autoplay muted playsinline></video>
@@ -84,6 +85,7 @@ captureBtn.addEventListener('click', () => {
 
 submitBtn.addEventListener('click', async () => {
   const name = nameInput.value.trim();
+  const email = document.getElementById('emailInput').value.trim();
   if (!name) {
     msgBox.innerHTML = '<div class="msg error">Please enter a name.</div>';
     return;
@@ -95,7 +97,7 @@ submitBtn.addEventListener('click', async () => {
     const res = await fetch('/api/enroll', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, images: captured })
+      body: JSON.stringify({ name, email, images: captured })
     });
     const data = await res.json();
 
@@ -104,6 +106,7 @@ submitBtn.addEventListener('click', async () => {
       captured = [];
       dots.forEach(d => d.classList.remove('done'));
       nameInput.value = '';
+      document.getElementById('emailInput').value = '';
       captureBtn.disabled = false;
     } else {
       msgBox.innerHTML = `<div class="msg error">${data.error}</div>`;
