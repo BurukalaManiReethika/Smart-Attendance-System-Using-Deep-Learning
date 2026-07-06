@@ -99,8 +99,9 @@ def send_email_async(to_address, subject, body):
             with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=15) as server:
                 server.login(SMTP_EMAIL, SMTP_PASSWORD)
                 server.sendmail(SMTP_EMAIL, [to_address], msg.as_string())
+            print(f"[EMAIL SENT] Successfully sent to {to_address}")
         except Exception as e:
-            print(f"[EMAIL ERROR] Could not send to {to_address}: {e}")
+            print(f"[EMAIL ERROR] Could not send to {to_address}: {type(e).__name__}: {e}")
 
     threading.Thread(target=_send, daemon=True).start()
 
@@ -111,6 +112,13 @@ def notify_attendance_marked(name):
     emails = load_emails()
     person_email = emails.get(name)
 
+    print(f"[EMAIL DEBUG] notify_attendance_marked called for '{name}'. "
+          f"EMAIL_ENABLED={EMAIL_ENABLED}, saved_emails={emails}, person_email={person_email}")
+
+    if not EMAIL_ENABLED:
+        print("[EMAIL SKIP] SMTP_EMAIL / SMTP_PASSWORD not set in environment.")
+        return
+
     if person_email:
         send_email_async(
             person_email,
@@ -118,6 +126,8 @@ def notify_attendance_marked(name):
             f"Hi {name},\n\nYour attendance was marked present on {now_str}.\n\n"
             f"— Smart Attendance System"
         )
+    else:
+        print(f"[EMAIL SKIP] No email saved for '{name}'. Available names: {list(emails.keys())}")
 
     if NOTIFY_ADMIN_EMAIL:
         send_email_async(
@@ -304,6 +314,8 @@ def api_people():
 
 
 load_encodings()
+print(f"[STARTUP] EMAIL_ENABLED={EMAIL_ENABLED} | SMTP_EMAIL={'SET' if SMTP_EMAIL else 'NOT SET'} | "
+      f"SMTP_PASSWORD={'SET' if SMTP_PASSWORD else 'NOT SET'} | known_people={sorted(set(known_names))}")
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
