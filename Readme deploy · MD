@@ -15,6 +15,20 @@ For a personal/learning project this is fine to start with, but know that:
 
 ## Steps to Deploy
 
+### 0. Set Up Email Notifications (Gmail)
+
+Attendance-marked emails use Gmail's SMTP with an **App Password** (not your normal Gmail password).
+
+1. Go to your Google Account → **Security** → turn on **2-Step Verification** (required for App Passwords)
+2. Go to https://myaccount.google.com/apppasswords
+3. Create an app password (name it "Attendance System"), Google gives you a 16-character password
+4. You'll need 3 environment variables on Render (added in Step 2 below):
+   - `SMTP_EMAIL` → your Gmail address (e.g. `youraddress@gmail.com`)
+   - `SMTP_PASSWORD` → the 16-character App Password (NOT your Gmail login password)
+   - `NOTIFY_ADMIN_EMAIL` → *(optional)* an email that gets notified every time ANYONE is marked present
+
+If these variables aren't set, the app still works fine — it just skips sending emails silently.
+
 ### 1. Push this project to GitHub
 ```bash
 cd attendance_web
@@ -30,10 +44,11 @@ git push -u origin main
 1. Go to https://render.com → **New** → **Web Service**
 2. Connect your GitHub repo
 3. Render should auto-detect `render.yaml` — if not, set manually:
-   - **Build Command:** `pip install -r requirements.txt`
+   - **Build Command:** `pip install -r requirements.txt && pip install --no-deps face_recognition==1.3.0`
    - **Start Command:** `gunicorn app:app --timeout 120 --workers 2`
    - **Environment:** Python 3
-4. Click **Create Web Service**
+4. Go to **Environment** tab → add the 3 email variables from Step 0 (`SMTP_EMAIL`, `SMTP_PASSWORD`, `NOTIFY_ADMIN_EMAIL`)
+5. Click **Create Web Service**
 
 ### 3. Wait for build
 ⚠️ `dlib` takes a while to compile (5–15 min on Render's free tier — it's compiling C++ code).
