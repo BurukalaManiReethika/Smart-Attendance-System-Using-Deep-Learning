@@ -192,13 +192,15 @@ def ask_chatbot(question):
                 "content-type": "application/json",
             },
             json={
-                "model": "claude-sonnet-4-6",
+                "model": "claude-sonnet-5",
                 "max_tokens": 400,
                 "system": system_prompt,
                 "messages": [{"role": "user", "content": question}],
             },
             timeout=30,
         )
+        if not response.ok:
+            print(f"[CHATBOT ERROR] {response.status_code}: {response.text}")
         response.raise_for_status()
         data = response.json()
         text_parts = [block["text"] for block in data.get("content", []) if block.get("type") == "text"]
