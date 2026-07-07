@@ -29,16 +29,6 @@ Attendance-marked emails use Gmail's SMTP with an **App Password** (not your nor
 
 If these variables aren't set, the app still works fine — it just skips sending emails silently.
 
-### 0.5 Set Up AI Chatbot (Optional)
-
-The "Ask AI" page lets people query attendance data in plain English, powered by Claude.
-
-1. Get an API key from https://console.anthropic.com/settings/keys
-2. Add one more environment variable on Render (Step 2 below):
-   - `ANTHROPIC_API_KEY` → your API key
-
-If this isn't set, the chatbot page still loads but replies that it isn't configured yet.
-
 ### 1. Push this project to GitHub
 ```bash
 cd attendance_web
@@ -57,7 +47,7 @@ git push -u origin main
    - **Build Command:** `pip install -r requirements.txt && pip install --no-deps face_recognition==1.3.0`
    - **Start Command:** `gunicorn app:app --timeout 120 --workers 2`
    - **Environment:** Python 3
-4. Go to **Environment** tab → add the email variables from Step 0, and `ANTHROPIC_API_KEY` from Step 0.5
+4. Go to **Environment** tab → add the email variables from Step 0
 5. Click **Create Web Service**
 
 ### 3. Wait for build
