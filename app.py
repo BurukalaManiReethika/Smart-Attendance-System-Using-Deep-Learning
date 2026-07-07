@@ -27,7 +27,6 @@ from datetime import datetime
 import numpy as np
 import cv2
 import face_recognition
-import requests
 from flask import Flask, render_template, request, jsonify
 
 app = Flask(__name__)
@@ -40,10 +39,6 @@ EMAILS_FILE = os.path.join(BASE_DIR, "emails.json")
 
 TOLERANCE = 0.5
 MODEL = "hog"
-
-# --- Chatbot (Anthropic API) config ---
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
-CHATBOT_ENABLED = bool(ANTHROPIC_API_KEY)
 
 # --- Email (Gmail SMTP) config, read from environment variables ---
 SMTP_EMAIL = os.environ.get("SMTP_EMAIL")        # your Gmail address, e.g. yourname@gmail.com
@@ -160,54 +155,65 @@ def get_all_attendance_records():
 
 
 def ask_chatbot(question):
-    """Send the user's question + attendance context to Claude and return the answer."""
-    if not CHATBOT_ENABLED:
-        return "Chatbot is not configured yet. Set the ANTHROPIC_API_KEY environment variable to enable it."
+    """
+    Free, rule-based attendance assistant — no external API, no cost.
+    Understands common attendance questions using keyword matching.
+    """
+    q = question.lower().strip()
 
-    records = get_all_attendance_records()
     enrolled_people = sorted(set(known_names))
     today_marked = sorted(load_already_marked())
+    records = get_all_attendance_records()
+    today_str = datetime.now().strftime("%Y-%m-%d")
 
-    context = (
-        f"Today's date: {datetime.now().strftime('%Y-%m-%d')}\n"
-        f"Enrolled people in the system: {', '.join(enrolled_people) if enrolled_people else 'None enrolled yet'}\n"
-        f"People marked present today: {', '.join(today_marked) if today_marked else 'None yet'}\n\n"
-        f"Full attendance history (name — date at time):\n"
-        + ("\n".join(records) if records else "No attendance records yet.")
+    # --- Who is present today ---
+    if any(phrase in q for phrase in ["who is present", "who's present", "present today", "who all present", "who came today"]):
+        if today_marked:
+            return f"Marked present today ({today_str}):\n" + "\n".join(f"• {n}" for n in today_marked)
+        return f"No one has been marked present yet today ({today_str})."
+
+    # --- How many present today / count ---
+    if any(phrase in q for phrase in ["how many", "count", "total present", "number of people"]):
+        return f"{len(today_marked)} out of {len(enrolled_people)} enrolled people are marked present today ({today_str})."
+
+    # --- Who is enrolled ---
+    if any(phrase in q for phrase in ["who is enrolled", "who's enrolled", "list of people", "who are enrolled", "registered people"]):
+        if enrolled_people:
+            return "Enrolled people in the system:\n" + "\n".join(f"• {n}" for n in enrolled_people)
+        return "No one is enrolled in the system yet."
+
+    # --- Was <name> marked / did <name> attend ---
+    for name in enrolled_people:
+        if name.lower().replace("_", " ") in q or name.lower() in q:
+            if name in today_marked:
+                # find their exact time from today's records
+                time_str = ""
+                for r in records:
+                    if r.startswith(name) and today_str in r:
+                        time_str = r.split(" at ")[-1] if " at " in r else ""
+                return f"Yes — {name} was marked present today{f' at {time_str}' if time_str else ''}."
+            else:
+                # check full history
+                past = [r for r in records if r.startswith(name)]
+                if past:
+                    return f"{name} was NOT marked present today. Most recent record: {past[-1]}"
+                return f"{name} is enrolled but has no attendance records yet."
+
+    # --- Attendance history / all records ---
+    if any(phrase in q for phrase in ["history", "all records", "full attendance", "every record"]):
+        if records:
+            return "Full attendance history:\n" + "\n".join(f"• {r}" for r in records[-20:])
+        return "No attendance records exist yet."
+
+    # --- Fallback: didn't understand ---
+    return (
+        "I can answer questions like:\n"
+        "• Who is present today?\n"
+        "• How many people are present?\n"
+        "• Who is enrolled in the system?\n"
+        "• Was <name> marked today?\n\n"
+        "Try rephrasing your question using one of these patterns."
     )
-
-    system_prompt = (
-        "You are an attendance assistant for a Smart Attendance System. "
-        "Answer the user's question using ONLY the attendance data provided below. "
-        "Be concise and direct. If the data doesn't answer the question, say so clearly.\n\n"
-        f"ATTENDANCE DATA:\n{context}"
-    )
-
-    try:
-        response = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": ANTHROPIC_API_KEY,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            json={
-                "model": "claude-sonnet-5",
-                "max_tokens": 400,
-                "system": system_prompt,
-                "messages": [{"role": "user", "content": question}],
-            },
-            timeout=30,
-        )
-        if not response.ok:
-            print(f"[CHATBOT ERROR] {response.status_code}: {response.text}")
-        response.raise_for_status()
-        data = response.json()
-        text_parts = [block["text"] for block in data.get("content", []) if block.get("type") == "text"]
-        return "\n".join(text_parts) if text_parts else "I couldn't generate a response. Please try again."
-    except Exception as e:
-        print(f"[CHATBOT ERROR] {type(e).__name__}: {e}")
-        return "Sorry, I couldn't reach the assistant right now. Please try again in a moment."
 
 
 def rebuild_encodings_from_disk():
@@ -404,7 +410,7 @@ def api_people():
 
 load_encodings()
 print(f"[STARTUP] EMAIL_ENABLED={EMAIL_ENABLED} | SMTP_EMAIL={'SET' if SMTP_EMAIL else 'NOT SET'} | "
-      f"SMTP_PASSWORD={'SET' if SMTP_PASSWORD else 'NOT SET'} | CHATBOT_ENABLED={CHATBOT_ENABLED} | "
+      f"SMTP_PASSWORD={'SET' if SMTP_PASSWORD else 'NOT SET'} | "
       f"known_people={sorted(set(known_names))}")
 
 if __name__ == "__main__":
