@@ -27,6 +27,7 @@ from datetime import datetime
 import numpy as np
 import cv2
 import face_recognition
+import requests
 from flask import Flask, render_template, request, jsonify
 
 app = Flask(__name__)
@@ -39,6 +40,10 @@ EMAILS_FILE = os.path.join(BASE_DIR, "emails.json")
 
 TOLERANCE = 0.5
 MODEL = "hog"
+
+# --- Chatbot (Anthropic API) config ---
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+CHATBOT_ENABLED = bool(ANTHROPIC_API_KEY)
 
 # --- Email (Gmail SMTP) config, read from environment variables ---
 SMTP_EMAIL = os.environ.get("SMTP_EMAIL")        # your Gmail address, e.g. yourname@gmail.com
@@ -135,6 +140,72 @@ def notify_attendance_marked(name):
             f"Attendance: {name} marked present",
             f"{name} was marked present at {now_str}."
         )
+
+
+def get_all_attendance_records():
+    """Read every attendance CSV file and return a combined text summary."""
+    all_records = []
+    if os.path.isdir(ATTENDANCE_DIR):
+        for filename in sorted(os.listdir(ATTENDANCE_DIR)):
+            if not filename.endswith(".csv"):
+                continue
+            filepath = os.path.join(ATTENDANCE_DIR, filename)
+            with open(filepath, "r", newline="") as f:
+                reader = csv.reader(f)
+                next(reader, None)
+                for row in reader:
+                    if row:
+                        all_records.append(f"{row[0]} — {row[1]} at {row[2]}")
+    return all_records
+
+
+def ask_chatbot(question):
+    """Send the user's question + attendance context to Claude and return the answer."""
+    if not CHATBOT_ENABLED:
+        return "Chatbot is not configured yet. Set the ANTHROPIC_API_KEY environment variable to enable it."
+
+    records = get_all_attendance_records()
+    enrolled_people = sorted(set(known_names))
+    today_marked = sorted(load_already_marked())
+
+    context = (
+        f"Today's date: {datetime.now().strftime('%Y-%m-%d')}\n"
+        f"Enrolled people in the system: {', '.join(enrolled_people) if enrolled_people else 'None enrolled yet'}\n"
+        f"People marked present today: {', '.join(today_marked) if today_marked else 'None yet'}\n\n"
+        f"Full attendance history (name — date at time):\n"
+        + ("\n".join(records) if records else "No attendance records yet.")
+    )
+
+    system_prompt = (
+        "You are an attendance assistant for a Smart Attendance System. "
+        "Answer the user's question using ONLY the attendance data provided below. "
+        "Be concise and direct. If the data doesn't answer the question, say so clearly.\n\n"
+        f"ATTENDANCE DATA:\n{context}"
+    )
+
+    try:
+        response = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": ANTHROPIC_API_KEY,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={
+                "model": "claude-sonnet-4-6",
+                "max_tokens": 400,
+                "system": system_prompt,
+                "messages": [{"role": "user", "content": question}],
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+        data = response.json()
+        text_parts = [block["text"] for block in data.get("content", []) if block.get("type") == "text"]
+        return "\n".join(text_parts) if text_parts else "I couldn't generate a response. Please try again."
+    except Exception as e:
+        print(f"[CHATBOT ERROR] {type(e).__name__}: {e}")
+        return "Sorry, I couldn't reach the assistant right now. Please try again in a moment."
 
 
 def rebuild_encodings_from_disk():
@@ -308,6 +379,22 @@ def api_enroll():
     return jsonify({"message": f"Enrolled '{name}' with {saved} photo(s).", "total_people": len(set(known_names))})
 
 
+@app.route("/chat")
+def chat_page():
+    return render_template("chat.html")
+
+
+@app.route("/api/chat", methods=["POST"])
+def api_chat():
+    payload = request.get_json(force=True)
+    question = payload.get("question", "").strip()
+    if not question:
+        return jsonify({"error": "Question is required"}), 400
+
+    answer = ask_chatbot(question)
+    return jsonify({"answer": answer})
+
+
 @app.route("/api/people", methods=["GET"])
 def api_people():
     return jsonify({"people": sorted(set(known_names))})
@@ -315,7 +402,8 @@ def api_people():
 
 load_encodings()
 print(f"[STARTUP] EMAIL_ENABLED={EMAIL_ENABLED} | SMTP_EMAIL={'SET' if SMTP_EMAIL else 'NOT SET'} | "
-      f"SMTP_PASSWORD={'SET' if SMTP_PASSWORD else 'NOT SET'} | known_people={sorted(set(known_names))}")
+      f"SMTP_PASSWORD={'SET' if SMTP_PASSWORD else 'NOT SET'} | CHATBOT_ENABLED={CHATBOT_ENABLED} | "
+      f"known_people={sorted(set(known_names))}")
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
