@@ -7,3 +7,4 @@ face-recognition-models==0.3.0
 Pillow
 Click
 setuptools<82
+requests
