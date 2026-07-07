@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chat — Smart Attendance</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<style>
+  .chat-window {
+    height: 420px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 4px 2px 12px;
+  }
+  .bubble {
+    max-width: 78%;
+    padding: 10px 14px;
+    border-radius: 12px;
+    font-size: 14px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+  }
+  .bubble.user {
+    align-self: flex-end;
+    background: var(--accent);
+    color: #05130d;
+    border-bottom-right-radius: 3px;
+  }
+  .bubble.bot {
+    align-self: flex-start;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-bottom-left-radius: 3px;
+  }
+  .bubble.typing {
+    color: var(--text-dim);
+    font-style: italic;
+  }
+  .chat-input-row {
+    display: flex;
+    gap: 10px;
+    margin-top: 12px;
+  }
+  .chat-input-row input {
+    flex: 1;
+    margin-bottom: 0;
+  }
+  .suggestions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 14px;
+  }
+  .suggestion-chip {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 12.5px;
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+  }
+  .suggestion-chip:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><span class="dot"></span> Smart Attendance</div>
+  <div class="nav">
+    <a href="/">Scan</a>
+    <a href="/enroll">Enroll</a>
+    <a href="/attendance">Records</a>
+    <a href="/chat" class="active">Ask AI</a>
+  </div>
+</div>
+
+<div class="wrap">
+  <h1>Ask About Attendance</h1>
+  <p class="subtitle">Ask questions in plain English — e.g. "Who is present today?" or "Was Ravi marked yesterday?"</p>
+
+  <div class="panel">
+    <div class="chat-window" id="chatWindow">
+      <div class="bubble bot">Hi! Ask me anything about attendance — who's present, when someone was marked, or totals for the day.</div>
+    </div>
+
+    <div class="chat-input-row">
+      <input type="text" id="questionInput" placeholder="Type your question…">
+      <button class="btn" id="sendBtn">Send</button>
+    </div>
+
+    <div class="suggestions">
+      <span class="suggestion-chip">Who is present today?</span>
+      <span class="suggestion-chip">How many people marked attendance today?</span>
+      <span class="suggestion-chip">Who is enrolled in the system?</span>
+    </div>
+  </div>
+</div>
+
+<script>
+const chatWindow = document.getElementById('chatWindow');
+const questionInput = document.getElementById('questionInput');
+const sendBtn = document.getElementById('sendBtn');
+
+function addBubble(text, sender) {
+  const div = document.createElement('div');
+  div.className = `bubble ${sender}`;
+  div.textContent = text;
+  chatWindow.appendChild(div);
+  chatWindow.scrollTop = chatWindow.scrollHeight;
+  return div;
+}
+
+async function sendQuestion(question) {
+  if (!question.trim()) return;
+  addBubble(question, 'user');
+  questionInput.value = '';
+  sendBtn.disabled = true;
+
+  const typingBubble = addBubble('Thinking…', 'bot typing');
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question })
+    });
+    const data = await res.json();
+    typingBubble.remove();
+    addBubble(data.answer || data.error || 'Something went wrong.', 'bot');
+  } catch (err) {
+    typingBubble.remove();
+    addBubble('Could not reach the server. Please try again.', 'bot');
+  }
+
+  sendBtn.disabled = false;
+}
+
+sendBtn.addEventListener('click', () => sendQuestion(questionInput.value));
+questionInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') sendQuestion(questionInput.value);
+});
+
+document.querySelectorAll('.suggestion-chip').forEach(chip => {
+  chip.addEventListener('click', () => sendQuestion(chip.textContent));
+});
+</script>
+
+</body>
+</html>
