@@ -15,27 +15,70 @@
     <a href="/enroll">Enroll</a>
     <a href="/attendance" class="active">Records</a>
     <a href="/chat">Ask AI</a>
+    <a href="/dashboard">Dashboard</a>
   </div>
 </div>
 
 <div class="wrap">
-  <h1>Today's Attendance <span class="count-badge">{{ today }}</span></h1>
-  <p class="subtitle">{{ rows|length }} person(s) marked present today.</p>
+  <h1>Attendance Records <span class="count-badge">{{ selected_date }}</span></h1>
+  <p class="subtitle">
+    {{ rows|length }} person(s) marked{% if is_today %} present today{% else %} present on {{ selected_date }}{% endif %}.
+    Marked after {{ late_after }} counts as <strong>Late</strong>.
+  </p>
 
   <div class="panel">
+    <div class="records-toolbar">
+      <form class="date-nav" method="get" action="/attendance">
+        <a class="btn secondary icon-btn {% if not prev_date %}disabled{% endif %}"
+           href="{% if prev_date %}/attendance?date={{ prev_date }}{% else %}#{% endif %}">&larr;</a>
+
+        <input type="date" name="date" value="{{ selected_date }}" max="{{ today }}"
+               onchange="this.form.submit()">
+
+        <a class="btn secondary icon-btn {% if not next_date %}disabled{% endif %}"
+           href="{% if next_date %}/attendance?date={{ next_date }}{% else %}#{% endif %}">&rarr;</a>
+
+        {% if not is_today %}
+        <a class="btn secondary" href="/attendance">Today</a>
+        {% endif %}
+      </form>
+
+      <div class="export-buttons">
+        <a class="btn secondary" href="/api/export?format=csv&scope=day&date={{ selected_date }}">Export Day (CSV)</a>
+        <a class="btn secondary" href="/api/export?format=xlsx&scope=day&date={{ selected_date }}">Export Day (Excel)</a>
+        <a class="btn" href="/api/export?format=xlsx&scope=all">Export Full History (Excel)</a>
+      </div>
+    </div>
+
     {% if rows %}
     <table>
       <thead>
-        <tr><th>Name</th><th>Date</th><th>Time</th></tr>
+        <tr><th>Name</th><th>Date</th><th>Time</th><th>Status</th></tr>
       </thead>
       <tbody>
         {% for row in rows %}
-        <tr><td>{{ row[0] }}</td><td>{{ row[1] }}</td><td>{{ row[2] }}</td></tr>
+        <tr>
+          <td>{{ row[0] }}</td>
+          <td>{{ row[1] }}</td>
+          <td>{{ row[2] }}</td>
+          <td><span class="status-pill {{ 'late' if row[3] == 'Late' else 'present' }}">{{ row[3] }}</span></td>
+        </tr>
         {% endfor %}
       </tbody>
     </table>
     {% else %}
-    <div class="empty-state">No attendance marked yet today. Go to the Scan page to begin.</div>
+    <div class="empty-state">
+      No attendance marked on {{ selected_date }}.
+      {% if is_today %}Go to the Scan page to begin.{% endif %}
+    </div>
+    {% endif %}
+
+    {% if available_dates %}
+    <div class="date-chip-row">
+      {% for d in available_dates[:10] %}
+      <a class="date-chip {% if d == selected_date %}active{% endif %}" href="/attendance?date={{ d }}">{{ d }}</a>
+      {% endfor %}
+    </div>
     {% endif %}
   </div>
 </div>
