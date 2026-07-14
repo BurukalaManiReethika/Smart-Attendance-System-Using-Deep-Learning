@@ -22,12 +22,14 @@ import json
 import smtplib
 import threading
 from email.mime.text import MIMEText
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import numpy as np
 import cv2
 import face_recognition
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, send_file, Response
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill
 
 app = Flask(__name__)
 
@@ -36,6 +38,10 @@ KNOWN_FACES_DIR = os.path.join(BASE_DIR, "known_faces")
 ATTENDANCE_DIR = os.path.join(BASE_DIR, "attendance_records")
 ENCODINGS_FILE = os.path.join(BASE_DIR, "encodings.pickle")
 EMAILS_FILE = os.path.join(BASE_DIR, "emails.json")
+
+# Anyone marked present after this time (24h "HH:MM") is tagged "Late" instead of "Present".
+# Override with the LATE_AFTER environment variable, e.g. LATE_AFTER=09:15
+LATE_AFTER = os.environ.get("LATE_AFTER", "09:30")
 
 TOLERANCE = 0.5
 MODEL = "hog"
@@ -140,17 +146,11 @@ def notify_attendance_marked(name):
 def get_all_attendance_records():
     """Read every attendance CSV file and return a combined text summary."""
     all_records = []
-    if os.path.isdir(ATTENDANCE_DIR):
-        for filename in sorted(os.listdir(ATTENDANCE_DIR)):
-            if not filename.endswith(".csv"):
-                continue
-            filepath = os.path.join(ATTENDANCE_DIR, filename)
-            with open(filepath, "r", newline="") as f:
-                reader = csv.reader(f)
-                next(reader, None)
-                for row in reader:
-                    if row:
-                        all_records.append(f"{row[0]} — {row[1]} at {row[2]}")
+    for date_str in sorted(list_attendance_dates()):
+        for row in read_attendance_csv(date_str):
+            name, date, time, status = row
+            tag = " (Late)" if status == "Late" else ""
+            all_records.append(f"{name} — {date} at {time}{tag}")
     return all_records
 
 
@@ -249,21 +249,57 @@ def decode_base64_image(data_url):
     return frame
 
 
+def get_csv_path_for_date(date_str):
+    return os.path.join(ATTENDANCE_DIR, f"attendance_{date_str}.csv")
+
+
 def get_today_csv_path():
     today = datetime.now().strftime("%Y-%m-%d")
-    return os.path.join(ATTENDANCE_DIR, f"attendance_{today}.csv")
+    return get_csv_path_for_date(today)
 
 
-def load_already_marked():
-    csv_path = get_today_csv_path()
-    marked = set()
+def compute_status(dt):
+    """Return 'Present' or 'Late' based on LATE_AFTER cutoff (HH:MM, 24h)."""
+    try:
+        cutoff = datetime.strptime(LATE_AFTER, "%H:%M").time()
+    except ValueError:
+        cutoff = datetime.strptime("09:30", "%H:%M").time()
+    return "Late" if dt.time() > cutoff else "Present"
+
+
+def read_attendance_csv(date_str):
+    """Read one day's CSV. Returns list of [name, date, time, status].
+    Older files saved before the Status column existed are filled in as 'Present'."""
+    csv_path = get_csv_path_for_date(date_str)
+    rows = []
     if os.path.exists(csv_path):
         with open(csv_path, "r", newline="") as f:
             reader = csv.reader(f)
             next(reader, None)
             for row in reader:
-                if row:
-                    marked.add(row[0])
+                if not row:
+                    continue
+                if len(row) >= 4:
+                    rows.append([row[0], row[1], row[2], row[3]])
+                elif len(row) == 3:
+                    rows.append([row[0], row[1], row[2], "Present"])
+    return rows
+
+
+def list_attendance_dates():
+    """All dates (YYYY-MM-DD) that have an attendance file, most recent first."""
+    dates = []
+    if os.path.isdir(ATTENDANCE_DIR):
+        for filename in os.listdir(ATTENDANCE_DIR):
+            if filename.startswith("attendance_") and filename.endswith(".csv"):
+                dates.append(filename[len("attendance_"):-len(".csv")])
+    return sorted(dates, reverse=True)
+
+
+def load_already_marked():
+    marked = set()
+    for row in read_attendance_csv(datetime.now().strftime("%Y-%m-%d")):
+        marked.add(row[0])
     return marked
 
 
@@ -273,13 +309,52 @@ def mark_attendance(name):
     if name in marked:
         return False
     file_exists = os.path.exists(csv_path)
+    now = datetime.now()
+    status = compute_status(now)
     with open(csv_path, "a", newline="") as f:
         writer = csv.writer(f)
         if not file_exists:
-            writer.writerow(["Name", "Date", "Time"])
-        now = datetime.now()
-        writer.writerow([name, now.strftime("%Y-%m-%d"), now.strftime("%H:%M:%S")])
+            writer.writerow(["Name", "Date", "Time", "Status"])
+        writer.writerow([name, now.strftime("%Y-%m-%d"), now.strftime("%H:%M:%S"), status])
     return True
+
+
+def build_dashboard_stats(days=14):
+    """Daily present-counts for the last N days, plus per-person attendance rate
+    over the days the system actually recorded attendance."""
+    all_dates = list_attendance_dates()
+    recent_dates = sorted(all_dates)[-days:] if all_dates else []
+
+    daily_counts = []
+    for d in recent_dates:
+        rows = read_attendance_csv(d)
+        daily_counts.append({
+            "date": d,
+            "present": sum(1 for r in rows if r[3] == "Present"),
+            "late": sum(1 for r in rows if r[3] == "Late"),
+        })
+
+    enrolled = sorted(set(known_names))
+    tracked_dates = all_dates  # every day with a record, for the rate calculation
+    per_person = []
+    for person in enrolled:
+        days_present = 0
+        for d in tracked_dates:
+            rows = read_attendance_csv(d)
+            if any(r[0] == person for r in rows):
+                days_present += 1
+        total_days = len(tracked_dates) if tracked_dates else 1
+        rate = round((days_present / total_days) * 100) if tracked_dates else 0
+        per_person.append({"name": person, "days_present": days_present, "total_days": len(tracked_dates), "rate": rate})
+
+    per_person.sort(key=lambda p: p["rate"], reverse=True)
+
+    return {
+        "daily_counts": daily_counts,
+        "per_person": per_person,
+        "total_enrolled": len(enrolled),
+        "total_tracked_days": len(tracked_dates),
+    }
 
 
 # ---------------------------------------------------------------- Routes
@@ -296,14 +371,98 @@ def enroll_page():
 
 @app.route("/attendance")
 def attendance_page():
-    csv_path = get_today_csv_path()
-    rows = []
-    if os.path.exists(csv_path):
-        with open(csv_path, "r", newline="") as f:
-            reader = csv.reader(f)
-            next(reader, None)
-            rows = list(reader)
-    return render_template("attendance.html", rows=rows, today=datetime.now().strftime("%Y-%m-%d"))
+    requested_date = request.args.get("date", "").strip()
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    date_str = requested_date if requested_date else today_str
+
+    try:
+        datetime.strptime(date_str, "%Y-%m-%d")
+    except ValueError:
+        date_str = today_str
+
+    rows = read_attendance_csv(date_str)
+    available_dates = list_attendance_dates()
+
+    # prev/next available date for quick navigation
+    prev_date = next((d for d in available_dates if d < date_str), None)
+    next_date = next((d for d in reversed(available_dates) if d > date_str), None)
+
+    return render_template(
+        "attendance.html",
+        rows=rows,
+        selected_date=date_str,
+        today=today_str,
+        is_today=(date_str == today_str),
+        available_dates=available_dates,
+        prev_date=prev_date,
+        next_date=next_date,
+        late_after=LATE_AFTER,
+    )
+
+
+@app.route("/dashboard")
+def dashboard_page():
+    return render_template("dashboard.html", late_after=LATE_AFTER)
+
+
+@app.route("/api/dashboard-data")
+def api_dashboard_data():
+    days = request.args.get("days", 14, type=int)
+    return jsonify(build_dashboard_stats(days=days))
+
+
+@app.route("/api/export")
+def api_export():
+    """Download attendance as CSV or Excel — a single date, or the full history."""
+    fmt = request.args.get("format", "csv").lower()
+    scope = request.args.get("scope", "day")  # "day" or "all"
+    date_str = request.args.get("date", datetime.now().strftime("%Y-%m-%d"))
+
+    if scope == "all":
+        rows = []
+        for d in sorted(list_attendance_dates()):
+            rows.extend(read_attendance_csv(d))
+        filename_base = "attendance_full_history"
+    else:
+        rows = read_attendance_csv(date_str)
+        filename_base = f"attendance_{date_str}"
+
+    header = ["Name", "Date", "Time", "Status"]
+
+    if fmt == "xlsx":
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Attendance"
+        ws.append(header)
+        for cell in ws[1]:
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = PatternFill(start_color="2F7A5C", end_color="2F7A5C", fill_type="solid")
+        for row in rows:
+            ws.append(row)
+        for col_cells in ws.columns:
+            width = max(len(str(c.value)) for c in col_cells if c.value is not None) + 4
+            ws.column_dimensions[col_cells[0].column_letter].width = max(width, 12)
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        return send_file(
+            buf,
+            as_attachment=True,
+            download_name=f"{filename_base}.xlsx",
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+    # default: CSV
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(header)
+    writer.writerows(rows)
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename_base}.csv"},
+    )
 
 
 @app.route("/api/recognize", methods=["POST"])
