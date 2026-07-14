@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard — Smart Attendance</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><span class="dot"></span> Smart Attendance</div>
+  <div class="nav">
+    <a href="/">Scan</a>
+    <a href="/enroll">Enroll</a>
+    <a href="/attendance">Records</a>
+    <a href="/chat">Ask AI</a>
+    <a href="/dashboard" class="active">Dashboard</a>
+  </div>
+</div>
+
+<div class="wrap">
+  <h1>Attendance Dashboard</h1>
+  <p class="subtitle">Overview of daily turnout and per-person attendance rate. Late cutoff: {{ late_after }}.</p>
+
+  <div class="stat-cards" id="statCards">
+    <div class="stat-card">
+      <div class="stat-value" id="statEnrolled">–</div>
+      <div class="stat-label">Enrolled people</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" id="statDays">–</div>
+      <div class="stat-label">Days tracked</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" id="statAvg">–</div>
+      <div class="stat-label">Avg. daily attendance</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-header">
+      <h2>Daily Attendance <span class="count-badge" id="rangeBadge">last 14 days</span></h2>
+      <div class="range-buttons">
+        <button class="btn secondary" data-days="7">7d</button>
+        <button class="btn secondary" data-days="14">14d</button>
+        <button class="btn secondary" data-days="30">30d</button>
+      </div>
+    </div>
+    <div class="chart-box"><canvas id="dailyChart"></canvas></div>
+  </div>
+
+  <div class="panel">
+    <h2>Per-Person Attendance Rate</h2>
+    <div class="chart-box"><canvas id="peopleChart"></canvas></div>
+    <div class="empty-state" id="noPeople" style="display:none;">No enrolled people yet — enroll someone to see rates here.</div>
+  </div>
+</div>
+
+<script>
+let dailyChart, peopleChart;
+const rangeBadge = document.getElementById('rangeBadge');
+
+async function loadDashboard(days) {
+  rangeBadge.textContent = `last ${days} days`;
+  const res = await fetch(`/api/dashboard-data?days=${days}`);
+  const data = await res.json();
+
+  document.getElementById('statEnrolled').textContent = data.total_enrolled;
+  document.getElementById('statDays').textContent = data.total_tracked_days;
+
+  const presentTotals = data.daily_counts.map(d => d.present + d.late);
+  const avg = presentTotals.length
+    ? (presentTotals.reduce((a, b) => a + b, 0) / presentTotals.length).toFixed(1)
+    : '0';
+  document.getElementById('statAvg').textContent = avg;
+
+  const labels = data.daily_counts.map(d => d.date.slice(5)); // MM-DD
+  const present = data.daily_counts.map(d => d.present);
+  const late = data.daily_counts.map(d => d.late);
+
+  if (dailyChart) dailyChart.destroy();
+  dailyChart = new Chart(document.getElementById('dailyChart'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'On time', data: present, backgroundColor: '#4fd1a5', stack: 'a' },
+        { label: 'Late', data: late, backgroundColor: '#e0a75e', stack: 'a' },
+      ]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { labels: { color: '#e7ecf1' } } },
+      scales: {
+        x: { stacked: true, ticks: { color: '#8b98a8' }, grid: { color: '#2a333f' } },
+        y: { stacked: true, beginAtZero: true, ticks: { color: '#8b98a8', precision: 0 }, grid: { color: '#2a333f' } }
+      }
+    }
+  });
+
+  const people = data.per_person;
+  document.getElementById('noPeople').style.display = people.length ? 'none' : 'block';
+  if (peopleChart) peopleChart.destroy();
+  peopleChart = new Chart(document.getElementById('peopleChart'), {
+    type: 'bar',
+    data: {
+      labels: people.map(p => p.name.replace(/_/g, ' ')),
+      datasets: [{
+        label: 'Attendance rate (%)',
+        data: people.map(p => p.rate),
+        backgroundColor: people.map(p => p.rate >= 75 ? '#4fd1a5' : p.rate >= 50 ? '#e0a75e' : '#e0616b'),
+      }]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { min: 0, max: 100, ticks: { color: '#8b98a8' }, grid: { color: '#2a333f' } },
+        y: { ticks: { color: '#e7ecf1' }, grid: { display: false } }
+      }
+    }
+  });
+}
+
+document.querySelectorAll('.range-buttons .btn').forEach(btn => {
+  btn.addEventListener('click', () => loadDashboard(parseInt(btn.dataset.days, 10)));
+});
+
+loadDashboard(14);
+</script>
+
+</body>
+</html>
